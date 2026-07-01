@@ -1,0 +1,253 @@
+name: Deploy live demo to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install package
+        run: pip install --quiet -e .
+
+      - name: Generate the static demo report
+        run: |
+          mkdir -p site
+          python - <<'PY'
+          import html
+          import sys
+          from dataclasses import asdict
+          sys.path.insert(0, "src")
+
+          from outlook_copilot_sorter.backend import MockGraphClient
+          from outlook_copilot_sorter.classifier import Classifier, DEFAULT_CATALOG, route
+          from outlook_copilot_sorter.copilot_drafter import CopilotDrafter
+
+          client = MockGraphClient()
+          clf = Classifier()
+          drafter = CopilotDrafter()
+
+          cards = []
+          for e in client.list_inbox():
+              r = clf.classify(e)
+              d = route(r, clf.catalog)
+              draft = drafter.draft(e, d.label) if d.drafts_reply else None
+              cards.append({
+                  "email": e, "result": r, "decision": d, "draft": draft,
+              })
+
+          def status_class(d):
+              if d.review_required:
+                  return "review"
+              return "sorted"
+
+          def status_label(d):
+              if d.review_required:
+                  return "REVIEW"
+              return "SORTED"
+
+          card_html_parts = []
+          for c in cards:
+              e = c["email"]
+              r = c["result"]
+              d = c["decision"]
+              sc = status_class(d)
+              sl = status_label(d)
+
+              draft_html = ""
+              if c["draft"] and not c["draft"].error:
+                  body_esc = html.escape(c["draft"].body).replace("\n", "<br>")
+                  draft_html = (
+                      "<div class='kicker'>Drafted reply (template backend)</div>"
+                      "<div class='draft'>"
+                      f"<div class='draft-subject'>Subject: {html.escape(c['draft'].subject)}</div>"
+                      f"<div class='draft-body'>{body_esc}</div>"
+                      "</div>"
+                  )
+
+              cands_str = " &middot; ".join(
+                  f"<code>{html.escape(name)}</code> {score:.2f}"
+                  for name, score in r.candidates[:4]
+              )
+
+              reason_html = ""
+              if d.review_required:
+                  reason_html = f"<div class='reason'>Reason: {html.escape(d.review_reason)}</div>"
+
+              card_html_parts.append(
+                  "<div class='card'>"
+                  f"<div class='card-header'>"
+                  f"<span class='badge {sc}'>{sl}</span>"
+                  f"<span class='mid'>{html.escape(e.id)}</span>"
+                  "</div>"
+                  "<div class='email-head'>"
+                  f"<div><strong>From:</strong> {html.escape(e.sender_name)} &lt;{html.escape(e.sender_email)}&gt;</div>"
+                  f"<div><strong>Subject:</strong> {html.escape(e.subject)}</div>"
+                  "</div>"
+                  f"<details><summary>Body preview</summary><pre>{html.escape(e.preview(400))}</pre></details>"
+                  "<div class='grid'>"
+                  "<div>"
+                  "<div class='kicker'>Classified as</div>"
+                  f"<div class='label'><code>{html.escape(r.label)}</code></div>"
+                  "</div>"
+                  "<div>"
+                  "<div class='kicker'>Confidence</div>"
+                  f"<div class='conf'>{r.confidence:.2f}</div>"
+                  "</div>"
+                  "<div>"
+                  "<div class='kicker'>Routed to</div>"
+                  f"<div class='queue'><code>{html.escape(d.folder)}</code> &middot; queue={html.escape(d.queue)}</div>"
+                  "</div>"
+                  "</div>"
+                  "<div class='kicker'>Top candidates</div>"
+                  f"<div class='cands'>{cands_str}</div>"
+                  f"{reason_html}"
+                  f"{draft_html}"
+                  "</div>"
+              )
+
+          all_cards = "\n".join(card_html_parts)
+
+          summary_line = (
+              f"12 messages | "
+              f"{sum(1 for c in cards if not c['decision'].review_required)} auto-routed | "
+              f"{sum(1 for c in cards if c['decision'].review_required)} flagged for review | "
+              f"{sum(1 for c in cards if c['draft'] and not c['draft'].error)} draft replies"
+          )
+
+          page = f"""<!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>Outlook Copilot sorter - live demo</title>
+            <style>
+              :root {{
+                --primary: #0369a1; --accent: #38bdf8;
+                --bg: #f0f9ff; --border: #bae6fd;
+                --ink: #0c4a6e; --muted: #64748b;
+                --review: #b45309; --sorted: #047857;
+              }}
+              * {{ box-sizing: border-box; }}
+              body {{
+                margin: 0; font-family: 'Segoe UI', system-ui, sans-serif;
+                background: var(--bg); color: var(--ink); line-height: 1.5;
+              }}
+              .hero {{
+                background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+                color: white; padding: 50px 24px 60px;
+              }}
+              .hero-inner {{ max-width: 1000px; margin: 0 auto; }}
+              .hero .kicker {{ font-size: 13px; letter-spacing: 2px; opacity: .8; text-transform: uppercase; }}
+              .hero h1 {{ font-size: 38px; margin: 10px 0 14px; line-height: 1.1; }}
+              .hero p {{ font-size: 17px; margin: 0; opacity: .92; max-width: 760px; }}
+              .container {{ max-width: 1000px; margin: -30px auto 60px; padding: 0 24px; }}
+              .summary-line {{ font-family: Consolas, monospace; background: #0c4a6e; color: #bae6fd; padding: 14px 18px; border-radius: 6px; font-size: 14px; margin: 16px 0; }}
+              .card {{
+                background: white; border: 1px solid var(--border); border-radius: 12px;
+                padding: 20px 24px; margin: 16px 0;
+                box-shadow: 0 1px 3px rgba(3, 105, 161, .08);
+              }}
+              .card-header {{ display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }}
+              .badge {{
+                color: white; padding: 4px 10px; border-radius: 12px;
+                font-size: 11px; letter-spacing: 1px; font-weight: 700;
+              }}
+              .badge.review {{ background: var(--review); }}
+              .badge.sorted {{ background: var(--sorted); }}
+              .mid {{ font-weight: 600; font-family: Consolas, monospace; color: var(--muted); }}
+              .email-head {{ background: #e0f2fe; padding: 10px 14px; border-radius: 6px; font-size: 13px; margin-bottom: 12px; }}
+              details summary {{ cursor: pointer; color: var(--accent); font-weight: 600; margin-bottom: 8px; font-size: 13px; }}
+              pre {{
+                background: #0c4a6e; color: #e0f2fe; padding: 14px 16px;
+                border-radius: 8px; overflow-x: auto;
+                font-family: Consolas, Menlo, monospace; font-size: 12px;
+                white-space: pre-wrap; word-wrap: break-word;
+              }}
+              .grid {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin: 12px 0; }}
+              .kicker {{
+                font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase;
+                color: var(--muted); margin: 8px 0 4px; font-weight: 600;
+              }}
+              .label code, .queue code {{
+                background: #e0f2fe; padding: 3px 8px; border-radius: 5px;
+                color: var(--primary); font-weight: 600; font-size: 14px;
+              }}
+              .conf {{ font-family: Consolas, monospace; font-size: 18px; font-weight: 600; }}
+              .queue {{ font-size: 13px; }}
+              .cands code {{
+                background: #f0f9ff; padding: 2px 7px; border-radius: 4px;
+                color: var(--primary); font-size: 12px;
+              }}
+              .reason {{ margin-top: 10px; color: var(--review); font-size: 13px; font-style: italic; }}
+              .draft {{
+                background: #ecfdf5; border-left: 4px solid #047857;
+                padding: 14px 18px; border-radius: 4px; margin-top: 6px;
+                font-size: 13px;
+              }}
+              .draft-subject {{ font-weight: 700; color: #064e3b; margin-bottom: 8px; }}
+              .draft-body {{ color: #064e3b; }}
+              .footer {{
+                margin-top: 40px; padding-top: 24px; border-top: 1px solid var(--border);
+                color: var(--muted); font-size: 13px; text-align: center;
+              }}
+              .footer code {{ background: #e0f2fe; padding: 2px 6px; border-radius: 4px; }}
+              .footer a {{ color: var(--accent); }}
+            </style>
+          </head>
+          <body>
+            <div class="hero">
+              <div class="hero-inner">
+                <div class="kicker">Outlook &middot; Copilot &middot; Graph webhook + client rules</div>
+                <h1>Outlook Copilot sorter - live demo</h1>
+                <p>Twelve bundled inbox items classified against the 6-label catalog,
+                routed to folders, drafted where appropriate. Two delivery modes:
+                server-side Graph webhook (LLM-classifiable, Copilot drafts) and
+                client-side Outlook rules XML fallback for tenants without app-reg
+                access. Regenerated on every push.</p>
+              </div>
+            </div>
+
+            <div class="container">
+              <div class="summary-line">{html.escape(summary_line)}</div>
+              {all_cards}
+
+              <div class="footer">
+                Regenerated on every push.
+                Install: <code>pip install -e .</code> then <code>outlook-sorter demo</code>.<br>
+                Source: <a href="https://github.com/derekgallardo01/outlook-copilot-sorter">github.com/derekgallardo01/outlook-copilot-sorter</a>
+              </div>
+            </div>
+          </body>
+          </html>
+          """
+          with open("site/index.html", "w", encoding="utf-8") as fh:
+              fh.write(page)
+          print("wrote site/index.html")
+          PY
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v5

@@ -1,0 +1,34 @@
+[project]
+name = "outlook-copilot-sorter"
+version = "1.0.0"
+description = "AI-powered Outlook email sorter with two delivery modes: (1) server-side Graph webhook that classifies mail before it hits Outlook and (2) client-side Outlook rules generator for tenants without app-registration access. Ships a Copilot-style reply drafter and a confidence-thresholded human-review queue. Stub-by-default; documented Copilot swap point."
+authors = [{name = "Derek Gallardo", email = "derekgallardo01@gmail.com"}]
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+graph = [
+    "msgraph-sdk>=1.0.0",
+    "msal>=1.24.0",
+]
+webhook = [
+    "flask>=3.0.0",
+]
+llm = [
+    "anthropic>=0.40.0",
+]
+
+[project.scripts]
+outlook-sorter = "outlook_copilot_sorter.cli:main"
+
+[project.urls]
+Repository = "https://github.com/derekgallardo01/outlook-copilot-sorter"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

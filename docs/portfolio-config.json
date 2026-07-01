@@ -1,0 +1,16 @@
+{
+  "repo": "outlook-copilot-sorter",
+  "title": "Outlook Copilot sorter",
+  "kicker": "Graph webhook + Outlook rules fallback",
+  "tagline": "AI-powered Outlook email sorting with two delivery modes: server-side Graph webhook (LLM-classifiable, Copilot drafts) and client-side Outlook rules XML (fallback for tenants without app-reg access).",
+  "features": [
+    { "label": "Delivery modes", "value": "Graph webhook + Outlook rules" },
+    { "label": "Label catalog", "value": "6 classes + human review" },
+    { "label": "Copilot drafter", "value": "3 tones, per-label templates" },
+    { "label": "Tests", "value": "34 pytest + 19 eval assertions" }
+  ],
+  "theme": {
+    "primary": "#0369a1",
+    "accent": "#38bdf8"
+  }
+}

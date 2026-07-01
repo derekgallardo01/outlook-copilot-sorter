@@ -1,0 +1,64 @@
+{
+  "description": "Per-message classification ground truth + summary invariants against the bundled mock inbox.",
+  "cases": [
+    {
+      "name": "password_reset_is_support",
+      "message_id": "m-01",
+      "expected_label": "support_ticket",
+      "expected_drafts_reply": true
+    },
+    {
+      "name": "renewal_is_sales",
+      "message_id": "m-02",
+      "expected_label": "sales_opportunity",
+      "expected_drafts_reply": true
+    },
+    {
+      "name": "zoom_recording_is_notification",
+      "message_id": "m-03",
+      "expected_label": "notification",
+      "expected_drafts_reply": false
+    },
+    {
+      "name": "ci_failed_is_notification",
+      "message_id": "m-04",
+      "expected_label": "notification",
+      "expected_drafts_reply": false
+    },
+    {
+      "name": "hr_enrollment_is_internal_hr",
+      "message_id": "m-05",
+      "expected_label": "internal_hr",
+      "expected_drafts_reply": false
+    },
+    {
+      "name": "seventy_percent_off_is_newsletter",
+      "message_id": "m-06",
+      "expected_label": "newsletter",
+      "expected_drafts_reply": false
+    },
+    {
+      "name": "aws_invoice_is_billing",
+      "message_id": "m-10",
+      "expected_label": "billing",
+      "expected_drafts_reply": false
+    },
+    {
+      "name": "following_up_is_unknown",
+      "message_id": "m-08",
+      "expected_label": "unknown",
+      "expected_review": true
+    },
+    {
+      "name": "cs_checkin_is_unknown_or_low_conf",
+      "message_id": "m-11",
+      "expected_review": true
+    },
+    {
+      "name": "second_support_ticket_is_support",
+      "message_id": "m-12",
+      "expected_label": "support_ticket",
+      "expected_drafts_reply": true
+    }
+  ]
+}
