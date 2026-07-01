@@ -52,6 +52,28 @@ outlook-sorter emit-outlook-rules --out my-rules.xml
 Then in Outlook desktop: **File → Manage Rules & Alerts → Options →
 Import Rules** → select `my-rules.xml`.
 
+## Refresh Graph subscriptions
+
+```bash
+outlook-sorter refresh-subscriptions
+```
+
+Deploy this as an hourly scheduled task (Azure Function timer trigger,
+or Windows Task Scheduler) — it renews subscriptions before their
+70-hour expiry and replaces any that have already lapsed.
+
+## Analyze user feedback (learn from moves)
+
+```bash
+outlook-sorter analyze-feedback
+```
+
+Reads a fabricated set of `LabelCorrection` events and emits a
+`CatalogUpdate` with suggested sender rules, keyword changes, and
+confidence-threshold tuning. In production, hook the correction
+capture to your actual mailbox move events (via Graph webhook or
+Outlook add-in).
+
 ## Run the Flask receiver
 
 ```bash
@@ -66,8 +88,8 @@ smoke test + production deployment notes.
 ## Run tests + evals
 
 ```bash
-python -m pytest -q     # 34 unit tests
-python evals/run.py     # 10 classification cases (19 assertions)
+python -m pytest -q     # 55 unit tests
+python evals/run.py     # 10 classification + 5 module cases (32 assertions)
 ```
 
 ## Next

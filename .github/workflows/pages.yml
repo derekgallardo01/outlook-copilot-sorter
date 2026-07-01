@@ -36,11 +36,18 @@ jobs:
           import html
           import sys
           from dataclasses import asdict
+          from datetime import datetime, timedelta, timezone
           sys.path.insert(0, "src")
 
           from outlook_copilot_sorter.backend import MockGraphClient
           from outlook_copilot_sorter.classifier import Classifier, DEFAULT_CATALOG, route
           from outlook_copilot_sorter.copilot_drafter import CopilotDrafter
+          from outlook_copilot_sorter.graph_subscription_manager import (
+              MockSubscriptionClient, Subscription, refresh_all,
+          )
+          from outlook_copilot_sorter.learn_from_moves import (
+              LabelCorrection, analyze_corrections,
+          )
 
           client = MockGraphClient()
           clf = Classifier()
@@ -132,6 +139,50 @@ jobs:
               f"{sum(1 for c in cards if not c['decision'].review_required)} auto-routed | "
               f"{sum(1 for c in cards if c['decision'].review_required)} flagged for review | "
               f"{sum(1 for c in cards if c['draft'] and not c['draft'].error)} draft replies"
+          )
+
+          # === Subscription manager demo ===
+          NOW_SIM = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
+          initial_subs = [
+              Subscription(id="sub-alice", resource="/users/alice@corp/messages",
+                           notification_url="https://sorter.example.com/graph-webhook",
+                           client_state="secret", expiration=NOW_SIM + timedelta(hours=50)),
+              Subscription(id="sub-bob", resource="/users/bob@corp/messages",
+                           notification_url="https://sorter.example.com/graph-webhook",
+                           client_state="secret", expiration=NOW_SIM + timedelta(hours=2)),
+              Subscription(id="sub-carol", resource="/users/carol@corp/messages",
+                           notification_url="https://sorter.example.com/graph-webhook",
+                           client_state="secret", expiration=NOW_SIM - timedelta(hours=3)),
+          ]
+          sub_client = MockSubscriptionClient(initial=initial_subs)
+          sub_report = refresh_all(
+              sub_client, notification_url="https://sorter.example.com/graph-webhook",
+              client_state="secret",
+              desired_resources=[s.resource for s in initial_subs] +
+                                ["/users/dan@corp/messages"],
+              now=NOW_SIM,
+          )
+
+          # === Feedback loop demo ===
+          NOW_FB = datetime(2026, 7, 1, tzinfo=timezone.utc)
+          fb_corrections = []
+          for i in range(5):
+              fb_corrections.append(LabelCorrection(
+                  email_id=f"m-cs-{i}", predicted_label="newsletter",
+                  predicted_confidence=0.62, corrected_to="sales_opportunity",
+                  corrected_at=NOW_FB, sender_email="cs@acme.com",
+                  subject=f"Renewal proposal for Q{i} - please review",
+              ))
+          for i in range(6):
+              fb_corrections.append(LabelCorrection(
+                  email_id=f"m-aws-{i}", predicted_label="notification",
+                  predicted_confidence=0.71, corrected_to="billing",
+                  corrected_at=NOW_FB, sender_email="aws-invoice-team@amazon.com",
+                  subject=f"Invoice available - AWS account xxxx-{i}",
+              ))
+          fb_update = analyze_corrections(
+              fb_corrections,
+              current_thresholds={"sales_opportunity": 0.55, "billing": 0.55, "newsletter": 0.55},
           )
 
           page = f"""<!DOCTYPE html>
@@ -230,6 +281,28 @@ jobs:
             <div class="container">
               <div class="summary-line">{html.escape(summary_line)}</div>
               {all_cards}
+
+              <div class="card">
+                <h2 style="margin: 0 0 12px; color: var(--primary); font-size: 22px;">Graph subscription lifecycle (hourly refresh)</h2>
+                <div class="summary-line">{html.escape(sub_report.summary())}</div>
+                <p>Graph subscriptions for <code>/messages</code> have a max lifetime of 4230 minutes (~70 hrs).
+                An hourly cron running <code>refresh_all()</code> keeps them alive: renews near-expiry,
+                creates missing, removes + replaces expired. Log the summary line, alert on errors.</p>
+              </div>
+
+              <div class="card">
+                <h2 style="margin: 0 0 12px; color: var(--primary); font-size: 22px;">Learn from user manual moves</h2>
+                <div class="summary-line">{html.escape(fb_update.summary())}</div>
+                <p>When users manually move messages, those moves are labeled corrections. Aggregate them
+                over 100+ events (the demo shows 11), extract patterns, and produce a weekly
+                <code>CatalogUpdate</code> the delivery lead reviews:</p>
+                <ul style="font-size: 13px; margin: 8px 0 8px 20px;">
+                  <li><strong>Sender rules</strong> — sender_locals consistently corrected to the same label</li>
+                  <li><strong>Keyword changes</strong> — words that drive wrong-to-right transitions</li>
+                  <li><strong>Threshold tuning</strong> — when the model is confidently wrong, raise the review threshold</li>
+                </ul>
+                <p style="font-size: 13px;">The kit does NOT auto-apply suggestions. A classifier that mutates itself is impossible to debug.</p>
+              </div>
 
               <div class="footer">
                 Regenerated on every push.

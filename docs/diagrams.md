@@ -65,3 +65,48 @@ flowchart LR
     HR --> D1
     D1 -->|yes| DR[Copilot draft on message]
 ```
+
+## Subscription lifecycle (hourly cron)
+
+```mermaid
+flowchart TB
+    START[Hourly cron: refresh_all] --> LIST[Read active subscriptions]
+    LIST --> LOOP{For each desired resource}
+    LOOP --> M{Subscription exists?}
+    M -->|no| C[Create new subscription<br/>lifetime = 4230 min]
+    M -->|yes| E{Hours remaining?}
+    E -->|expired| D[Delete + recreate]
+    E -->|less than 4h| R[Renew to max lifetime]
+    E -->|more than 4h| H[Healthy - no-op]
+    C --> REP[RefreshReport]
+    D --> REP
+    R --> REP
+    H --> REP
+    REP --> LOG[Log summary; alert on errors]
+```
+
+## Learn-from-moves feedback loop
+
+```mermaid
+flowchart LR
+    USER[User manually moves message] --> RC[record_correction]
+    RC --> STORE[(Correction store)]
+    STORE --> ANALYZE[analyze_corrections<br/>runs weekly]
+
+    ANALYZE --> SR{Sender consistently corrected<br/>to same label?}
+    SR -->|3+ corrections, 80%+ dominance| SR_YES[SenderRuleSuggestion:<br/>add sender_local]
+    SR -->|no| SR_NO[skip]
+
+    ANALYZE --> KW{Keyword appears in<br/>wrong-to-right transitions?}
+    KW -->|4+ corrections| KW_YES[KeywordWeightSuggestion:<br/>add / remove keyword]
+    KW -->|no| KW_NO[skip]
+
+    ANALYZE --> T{Corrections cluster at<br/>HIGH confidence?}
+    T -->|5+ corrections, avg conf >= threshold| T_YES[ThresholdSuggestion:<br/>raise to force review]
+    T -->|no| T_NO[skip]
+
+    SR_YES --> CU[CatalogUpdate]
+    KW_YES --> CU
+    T_YES --> CU
+    CU --> REVIEW[Delivery lead reviews weekly<br/>+ applies safe subset]
+```

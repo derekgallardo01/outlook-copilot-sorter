@@ -28,6 +28,8 @@ tenant can migrate between them without re-training.
 | `classifier.py` | 6-label catalog + rule/keyword classifier + `route()` for folder/queue/SLA/drafts_reply |
 | `copilot_drafter.py` | Substitution templates by default; Graph-Copilot backend behind an env var |
 | `graph_webhook.py` | Parse Graph POST body + validate `clientState` + dispatch to classifier/drafter/client |
+| `graph_subscription_manager.py` | Subscription lifecycle: `list_subscriptions` / `plan_renewals` / `refresh_all` for scheduled cron |
+| `learn_from_moves.py` | Ingest `LabelCorrection` events + emit `CatalogUpdate` suggestions (sender rules, keyword changes, threshold tuning) |
 | `outlook_rules.py` | Translate the catalog into Outlook-importable XML |
 | `backend.py` | `MockGraphClient` + 12-message fixture inbox for tests + demo |
 | `cli.py` | The `outlook-sorter` script's subcommand dispatch |
@@ -101,3 +103,53 @@ The subset supported: `SubjectContains`, `BodyContains`,
 imports these cleanly. Delegated LLM classification is not possible in
 this mode — Outlook rules are keyword-only. That's why the two modes
 share a catalog but the LLM upgrade path is server-side only.
+
+## The Graph subscription manager
+
+Graph subscriptions for `/messages` have a max lifetime of 4230 minutes
+(~70 hours). If a subscription expires without renewal, notifications
+stop and the classifier goes silent — the delivery lead usually finds
+out from an angry client 8 hours later.
+
+`refresh_all(client, notification_url, client_state, desired_resources)`
+is the one call a scheduled Azure Function / cron job makes every hour:
+
+- **Every desired resource without an active subscription** → create
+  one at max lifetime
+- **Every subscription with less than `DEFAULT_RENEW_THRESHOLD_HOURS`
+  remaining** → renew to max lifetime
+- **Every expired subscription** → delete + replace with a fresh one
+- **Every healthy subscription** → leave alone
+
+The report has `renewed / created / healthy / expired_removed / errors`
+counts + IDs, so the cron job can log a one-line status per hour and
+alert only on errors.
+
+## The learn-from-moves feedback loop
+
+When a user manually moves a message from `Sales/Inbox` to
+`Support/Inbox`, that's a labeled correction: the classifier said
+`sales_opportunity` but the correct label was `support_ticket`.
+
+`record_correction(email, predicted_label, predicted_confidence,
+corrected_to, at)` captures the event. Over 100+ corrections,
+`analyze_corrections(corrections, current_thresholds)` produces a
+`CatalogUpdate` with three kinds of suggestions:
+
+- **Sender-rule suggestions** — if a sender_local consistently gets
+  corrected to the same label (>= 3 corrections + >= 80% dominance),
+  add it to that label's `sender_locals`
+- **Keyword change suggestions** — if a specific keyword appears in
+  many corrections between the same (wrong, right) label pair
+  (>= 4 corrections), add to the right label + remove from the wrong
+- **Threshold change suggestions** — if corrections cluster at HIGH
+  confidence for a label (avg confidence >= current threshold with
+  >= 5 corrections), the model is confidently wrong — raise the
+  threshold to force human review
+
+The kit deliberately does NOT auto-apply changes to the catalog. A
+classifier that mutates itself is impossible to debug. The delivery
+lead reviews the update weekly and applies the safe subset.
+
+The `MIN_CORRECTIONS_FOR_*` constants tune noise-vs-signal trade-off
+per suggestion type.

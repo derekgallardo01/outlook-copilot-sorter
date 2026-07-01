@@ -70,6 +70,36 @@ add a scheduled task that calls `subscriptions.by_subscription_id(id).patch(
 
 ---
 
+**Q: How do I know if my subscription cron is actually running?**
+
+Two signals: `RefreshReport.summary()` should show at least 1
+`healthy` per cron run against a live tenant. If it shows `0 healthy`
+and `N created`, either the subscriptions expired unnoticed or the
+cron didn't fire the previous hour. Log the summary line + alert on
+`report.errors`.
+
+The kit does NOT include a "subscriptions health dashboard" — that's
+a separate observability layer. Pair with
+[llm-observability-kit](https://github.com/derekgallardo01/llm-observability-kit)
+if you want fired-alert semantics.
+
+---
+
+**Q: The learn-from-moves suggestions look aggressive. How do I filter
+noise?**
+
+Bump the `MIN_CORRECTIONS_FOR_*` constants in `learn_from_moves.py`.
+Defaults (3 / 4 / 5) are tuned for a first month of calibration.
+After the classifier stabilizes, raise to 6 / 8 / 10 so only strong
+signals produce suggestions.
+
+If you see the same keyword suggested to add AND remove for related
+labels, that's usually because the classifier has an over-broad
+keyword shared between two labels. Manually merge the labels or add
+a `weight` adjustment before applying the suggestion.
+
+---
+
 **Q: Do you offer this as a delivered engagement?**
 
 Yes. See my Upwork profile at
@@ -77,4 +107,5 @@ Yes. See my Upwork profile at
 or email derekgallardo01@gmail.com. Typical scope: USD 400 - 800
 fixed for client-side rules install; USD 1,800 - 3,500 for the
 Graph-webhook build with Copilot drafter + your first month of
-keyword tuning.
+keyword tuning; USD 250/mo retainer for subscription-cron + weekly
+feedback-loop review.

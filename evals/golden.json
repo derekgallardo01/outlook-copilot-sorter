@@ -1,5 +1,5 @@
 {
-  "description": "Per-message classification ground truth + summary invariants against the bundled mock inbox.",
+  "description": "Per-message classification ground truth + module-level assertions.",
   "cases": [
     {
       "name": "password_reset_is_support",
@@ -59,6 +59,51 @@
       "message_id": "m-12",
       "expected_label": "support_ticket",
       "expected_drafts_reply": true
+    }
+  ],
+  "module_cases": [
+    {
+      "name": "subscription_manager_refreshes_near_expiry",
+      "op": "subscription_refresh_mixed",
+      "assertions": [
+        {"path": "renewed_count", "gte": 1},
+        {"path": "created_count", "gte": 1},
+        {"path": "healthy_count", "gte": 1},
+        {"path": "expired_removed_count", "gte": 1}
+      ]
+    },
+    {
+      "name": "subscription_manager_no_op_on_healthy_sub",
+      "op": "subscription_refresh_healthy",
+      "assertions": [
+        {"path": "renewed_count", "eq": 0},
+        {"path": "created_count", "eq": 0},
+        {"path": "healthy_count", "gte": 1}
+      ]
+    },
+    {
+      "name": "feedback_produces_sender_rule_at_5_corrections",
+      "op": "feedback_5_sender_corrections",
+      "assertions": [
+        {"path": "sender_rule_count", "gte": 1},
+        {"path": "total_corrections", "eq": 5}
+      ]
+    },
+    {
+      "name": "feedback_produces_no_suggestion_below_threshold",
+      "op": "feedback_2_corrections",
+      "assertions": [
+        {"path": "sender_rule_count", "eq": 0},
+        {"path": "keyword_change_count", "eq": 0},
+        {"path": "threshold_change_count", "eq": 0}
+      ]
+    },
+    {
+      "name": "feedback_ignores_stopwords_in_keyword_suggestions",
+      "op": "feedback_stopword_subjects",
+      "assertions": [
+        {"path": "stopword_keyword_count", "eq": 0}
+      ]
     }
   ]
 }
