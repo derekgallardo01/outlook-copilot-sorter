@@ -27,10 +27,12 @@ outlook-sorter classify-inbox --json                   # machine-readable
 outlook-sorter webhook-smoke                           # simulate Graph webhook batch
 outlook-sorter emit-outlook-rules --out my-rules.xml   # fallback path
 outlook-sorter list-labels                             # show the 6 default classes
+outlook-sorter refresh-subscriptions                   # keep Graph subscriptions alive
+outlook-sorter analyze-feedback                        # learn from user manual moves
 ```
 
 ```bash
-python -m pytest -q                                    # 34 unit tests
+python -m pytest -q                                    # 55 unit tests
 python evals/run.py                                    # 10 classification cases (19 assertions)
 ```
 
@@ -114,6 +116,63 @@ m-12   support_ticket        0.89 Support/Inbox          DRAFTED
 `unknown` → REVIEW queue (the "Following up" cold-follow-up and the
 customer-success check-in — both legitimately ambiguous).
 
+## Subscription lifecycle
+
+Graph subscriptions for `/messages` have a max lifetime of 4230 minutes
+(~70 hours). If a subscription expires without renewal, notifications
+stop and the classifier goes silent — the delivery lead usually finds
+out from an angry client 8 hours later.
+
+`refresh-subscriptions` handles the lifecycle in one call:
+
+```
+$ outlook-sorter refresh-subscriptions
+Refresh: 2 created, 1 renewed, 1 healthy, 1 expired-removed, 0 errors
+
+  CREATED   bfd7b546-...
+  CREATED   9a3b47fb-...
+  RENEWED   sub-02
+  HEALTHY   sub-01
+  REMOVED   sub-03
+```
+
+Deploy it as an Azure Function on a 1-hour timer, or a Windows Task
+Scheduler job that runs `outlook-sorter refresh-subscriptions` every
+hour. Uses `refresh_all()` internally so you can wrap it in your own
+cron.
+
+## Learning from user manual moves
+
+When a user manually moves a message from `Sales/Inbox` to
+`Support/Inbox`, that's a labeled correction: the classifier said
+`sales_opportunity` but the correct label was `support_ticket`. Over
+100+ corrections, patterns emerge — specific senders that should
+override the classifier entirely, specific keywords that push messages
+to the wrong class, and per-label confidence thresholds that are too
+low or too high.
+
+`analyze-feedback` aggregates recorded corrections and emits an
+actionable `CatalogUpdate`:
+
+```
+$ outlook-sorter analyze-feedback
+Catalog update from 15 corrections: 2 sender-rule suggestions,
+16 keyword changes, 2 threshold changes
+
+Sender-rule suggestions:
+  add sender_local 'aws-invoice-team' to label 'billing'   (6 corrections)
+  add sender_local 'cs' to label 'sales_opportunity'   (5 corrections)
+
+Keyword changes:
+  add    'renewal'    for label 'sales_opportunity'   (9 corrections)
+  remove 'renewal'    for label 'newsletter'          (9 corrections)
+  ...
+```
+
+The kit deliberately does NOT auto-apply changes to the catalog. A
+classifier that mutates itself is impossible to debug. The delivery
+lead reviews the update weekly and applies the safe subset.
+
 ## Architecture
 
 ```mermaid
@@ -165,11 +224,13 @@ See [`docs/customization.md`](docs/customization.md).
 | `src/outlook_copilot_sorter/classifier.py` | 6-label catalog + rule/keyword classifier + confidence-thresholded router |
 | `src/outlook_copilot_sorter/copilot_drafter.py` | Substitution + Copilot backends, tone-tagged templates |
 | `src/outlook_copilot_sorter/graph_webhook.py` | Graph change-notification parser + batch processor |
+| `src/outlook_copilot_sorter/graph_subscription_manager.py` | Subscription lifecycle: list, plan renewals, refresh_all() for scheduled jobs |
+| `src/outlook_copilot_sorter/learn_from_moves.py` | Feedback loop: LabelCorrection ingestion + CatalogUpdate suggestions (sender rules, keyword changes, threshold tuning) |
 | `src/outlook_copilot_sorter/outlook_rules.py` | Client-side rules XML generator (fallback path) |
 | `src/outlook_copilot_sorter/backend.py` | `MockGraphClient` + 12-message fixture inbox |
-| `src/outlook_copilot_sorter/cli.py` | `classify-inbox / webhook-smoke / emit-outlook-rules / list-labels / demo` |
+| `src/outlook_copilot_sorter/cli.py` | `classify-inbox / webhook-smoke / emit-outlook-rules / list-labels / refresh-subscriptions / analyze-feedback / demo` |
 | `examples/graph_webhook_server.py` | Flask receiver for production Graph webhooks |
-| `tests/` | 34 pytest tests across classifier + drafter + webhook + rules |
+| `tests/` | 55 pytest tests across classifier + drafter + webhook + rules + subscription-manager + feedback-loop |
 | `evals/golden.json` | 10 per-message cases (19 assertions) |
 | `evals/run.py` | Eval harness |
 | `pyproject.toml` | Package + `outlook-sorter` script entry |

@@ -110,6 +110,117 @@ def _list_labels() -> None:
         print(f"{cfg.label:22s} {cfg.display_name:32s}")
 
 
+def _refresh_subscriptions() -> None:
+    """Demo: create some subscriptions with different expirations, then run refresh_all."""
+    from datetime import datetime, timedelta, timezone
+    from outlook_copilot_sorter.graph_subscription_manager import (
+        MockSubscriptionClient, Subscription, refresh_all,
+    )
+
+    now = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
+    initial = [
+        # Healthy - lots of runway
+        Subscription(id="sub-01",
+                     resource="/users/alice@corp.onmicrosoft.com/mailFolders('Inbox')/messages",
+                     notification_url="https://sorter.example.com/graph-webhook",
+                     client_state="secret", expiration=now + timedelta(hours=50)),
+        # Near expiry - should be renewed
+        Subscription(id="sub-02",
+                     resource="/users/bob@corp.onmicrosoft.com/mailFolders('Inbox')/messages",
+                     notification_url="https://sorter.example.com/graph-webhook",
+                     client_state="secret", expiration=now + timedelta(hours=2)),
+        # Expired - should be removed + replaced
+        Subscription(id="sub-03",
+                     resource="/users/carol@corp.onmicrosoft.com/mailFolders('Inbox')/messages",
+                     notification_url="https://sorter.example.com/graph-webhook",
+                     client_state="secret", expiration=now - timedelta(hours=3)),
+    ]
+    client = MockSubscriptionClient(initial=initial)
+
+    desired = [s.resource for s in initial] + [
+        # New user - no subscription yet
+        "/users/dan@corp.onmicrosoft.com/mailFolders('Inbox')/messages",
+    ]
+
+    report = refresh_all(
+        client, notification_url="https://sorter.example.com/graph-webhook",
+        client_state="secret", desired_resources=desired, now=now,
+    )
+    print(report.summary())
+    print()
+    for sid in report.created:
+        print(f"  CREATED   {sid}")
+    for sid in report.renewed:
+        print(f"  RENEWED   {sid}")
+    for sid in report.healthy:
+        print(f"  HEALTHY   {sid}")
+    for sid in report.expired_removed:
+        print(f"  REMOVED   {sid}")
+
+
+def _analyze_feedback() -> None:
+    """Demo: analyze a fabricated set of label corrections."""
+    from datetime import datetime, timezone
+
+    from outlook_copilot_sorter.learn_from_moves import (
+        LabelCorrection, analyze_corrections,
+    )
+
+    now = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    # Fabricate 30 corrections that would emerge over a first calibration week
+    corrections: list[LabelCorrection] = []
+    # 5 messages from cs@acme.com misclassified as newsletter -> should be sales
+    for i in range(5):
+        corrections.append(LabelCorrection(
+            email_id=f"m-cs-{i}", predicted_label="newsletter", predicted_confidence=0.62,
+            corrected_to="sales_opportunity", corrected_at=now,
+            sender_email="cs@acme.com",
+            subject=f"Renewal proposal for Q{i} - please review",
+        ))
+    # 4 messages with "renewal" in subject wrongly labeled newsletter
+    for i in range(4):
+        corrections.append(LabelCorrection(
+            email_id=f"m-r-{i}", predicted_label="newsletter", predicted_confidence=0.58,
+            corrected_to="sales_opportunity", corrected_at=now,
+            sender_email=f"sales{i}@bigco.com",
+            subject=f"renewal proposal quote follow-up",
+        ))
+    # 6 misclassifications from AWS invoice-adjacent addresses -> billing
+    for i in range(6):
+        corrections.append(LabelCorrection(
+            email_id=f"m-aws-{i}", predicted_label="notification", predicted_confidence=0.71,
+            corrected_to="billing", corrected_at=now,
+            sender_email="aws-invoice-team@amazon.com",
+            subject=f"Invoice available - AWS account xxxx-{i}",
+        ))
+
+    update = analyze_corrections(
+        corrections,
+        current_thresholds={"sales_opportunity": 0.55, "billing": 0.55, "newsletter": 0.55},
+    )
+    print(update.summary())
+    print()
+    if update.sender_rules:
+        print("Sender-rule suggestions:")
+        for s in update.sender_rules:
+            print(f"  add sender_local {s.sender_local!r} to label {s.label!r}   "
+                  f"({s.correction_count} corrections)")
+            print(f"    reason: {s.reason}")
+        print()
+    if update.keyword_changes:
+        print("Keyword changes:")
+        for k in update.keyword_changes:
+            print(f"  {k.direction:6s} {k.keyword!r:20s} for label {k.label!r}   "
+                  f"({k.correction_count} corrections)")
+        print()
+    if update.threshold_changes:
+        print("Threshold changes:")
+        for t in update.threshold_changes:
+            print(f"  {t.label!r}: {t.current_threshold:.2f} -> {t.suggested_threshold:.2f}   "
+                  f"({t.correction_count} corrections)")
+            print(f"    reason: {t.reason}")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="outlook-sorter")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -126,6 +237,12 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("list-labels", help="Show the 6 default label classes.")
 
+    sub.add_parser("refresh-subscriptions",
+                   help="Simulate the hourly Graph subscription lifecycle refresh.")
+
+    sub.add_parser("analyze-feedback",
+                   help="Analyze user manual moves and suggest catalog updates.")
+
     sub.add_parser("demo", help="Run every subcommand end-to-end.")
 
     args = parser.parse_args(argv)
@@ -138,6 +255,10 @@ def main(argv: list[str] | None = None) -> int:
         _webhook_smoke()
     elif args.cmd == "list-labels":
         _list_labels()
+    elif args.cmd == "refresh-subscriptions":
+        _refresh_subscriptions()
+    elif args.cmd == "analyze-feedback":
+        _analyze_feedback()
     elif args.cmd == "demo":
         _demo()
     else:

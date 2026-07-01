@@ -39,4 +39,6 @@ jobs:
           outlook-sorter classify-inbox --json > /dev/null
           outlook-sorter emit-outlook-rules > /dev/null
           outlook-sorter webhook-smoke > /dev/null
+          outlook-sorter refresh-subscriptions > /dev/null
+          outlook-sorter analyze-feedback > /dev/null
           outlook-sorter demo > /dev/null
